@@ -1,5 +1,8 @@
 import argparse
 import logging
+from pathlib import Path
+
+from a4_passport_photo_layout import A4PassportLayout
 from batch_photo_processor import BatchProcessor
 from passport_photo_maker import PassportPhotoMaker
 
@@ -28,5 +31,20 @@ if __name__ == "__main__":
     if args.once:
         files, outputs = processor.process_once()
         logging.info("Done (once): scanned %d files, produced %d outputs", files, outputs)
+
+        output_dir = Path(args.out)
+
+        images = sorted(
+            str(p) for p in output_dir.glob("*.jpg")
+        )
+
+        layout = A4PassportLayout()
+        total_pages = layout.create_pages(
+            image_paths=images,
+            output_dir=str(output_dir)
+        )
+
+        print(f"Created {total_pages} pages")
+
     else:
         processor.run_forever()
