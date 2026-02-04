@@ -23,39 +23,71 @@ class A4PassportLayout:
         self.page_w = int(8.27 * dpi)   # A4 width
         self.page_h = int(11.69 * dpi)  # A4 height
 
+    def prepare_image(self, path: str) -> Image.Image:
+        img = Image.open(path).convert("RGB")
+        img = img.rotate(-90, expand=True)
+        img = img.resize((self.photo_w, self.photo_h), Image.Resampling.LANCZOS)
+
+        pad = int(0.1 * self.dpi)
+        padded = Image.new(
+            "RGB",
+            (self.photo_w + 2 * pad, self.photo_h + 2 * pad),
+            self.bg_color,
+        )
+        padded.paste(img, (pad, pad))
+
+        border = 1
+        bordered = Image.new(
+            "RGB",
+            (padded.width + 2 * border, padded.height + 2 * border),
+            (0, 0, 0),
+        )
+        bordered.paste(padded, (border, border))
+
+        return bordered
+
     def create_page(self, image_paths: List[str], output_path: str):
         page = Image.new("RGB", (self.page_w, self.page_h), self.bg_color)
 
-        x = self.margin_px
-        y = self.margin_px
-        col = 0
+        images = [self.prepare_image(p) for p in image_paths]
 
-        for path in image_paths:
-            img = Image.open(path).convert("RGB")
-            img = img.rotate(-90, expand=True)
-            img = img.resize((self.photo_w, self.photo_h), Image.Resampling.LANCZOS)
+        x0 = self.margin_px
+        y0 = self.margin_px
+        col_step = self.photo_w + self.gap_px
+        row_step = self.photo_h + self.gap_px
 
-            pad = int(0.1 * self.dpi)
-            padded_img = Image.new("RGB", (self.photo_w + 2 * pad, self.photo_h + 2 * pad), self.bg_color)
-            padded_img.paste(img, (pad, pad))
+        row = 0
+        i = 0
 
-            # now add a border around the padded image
-            border = 1  # 2 pixels border
-            img = Image.new("RGB", (padded_img.width + 2 * border, padded_img.height + 2 * border), (0, 0, 0))
-            img.paste(padded_img, (border, border))
-            # repeat twice (matches demo)
-            for _ in range(4):
+        while i < len(images):
+            y = y0 + row * row_step
 
-                # add padding around the image 0.15 inch (0.15 * dpi pixels)
-                page.paste(img, (x, y))
+            # ---- TWO IMAGES AVAILABLE ----
+            if i + 1 < len(images):
+                img_left = images[i]
+                img_right = images[i + 1]
 
-                col += 1
-                if col >= self.columns:
-                    col = 0
-                    x = self.margin_px
-                    y += self.photo_h + self.gap_px
-                else:
-                    x += self.photo_w + self.gap_px
+                for r in range(2):  # repeat for two rows
+                    y_row = y + r * row_step
+
+                    page.paste(img_left, (x0 + 0 * col_step, y_row))
+                    page.paste(img_left, (x0 + 1 * col_step, y_row))
+                    page.paste(img_right, (x0 + 2 * col_step, y_row))
+                    page.paste(img_right, (x0 + 3 * col_step, y_row))
+
+                i += 2
+                row += 2
+
+            # ---- LAST SINGLE IMAGE ----
+            else:
+                img = images[i]
+                y_row = y
+
+                for c in range(4):
+                    page.paste(img, (x0 + c * col_step, y_row))
+
+                i += 1
+                row += 1
 
         page.save(output_path, dpi=(self.dpi, self.dpi))
         return output_path
