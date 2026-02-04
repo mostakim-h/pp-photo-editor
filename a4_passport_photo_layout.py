@@ -1,3 +1,6 @@
+import uuid
+from pathlib import Path
+
 from PIL import Image
 from typing import List
 
@@ -46,48 +49,62 @@ class A4PassportLayout:
 
         return bordered
 
-    def create_page(self, image_paths: List[str], output_path: str):
-        page = Image.new("RGB", (self.page_w, self.page_h), self.bg_color)
+    def create_pages(self, image_paths: List[str], output_dir: str):
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
 
+        # ---- PREPARE ALL IMAGES ONCE ----
         images = [self.prepare_image(p) for p in image_paths]
 
-        x0 = self.margin_px
-        y0 = self.margin_px
-        col_step = self.photo_w + self.gap_px
-        row_step = self.photo_h + self.gap_px
+        MAX_PER_PAGE = 7
+        page_index = 1
 
-        row = 0
-        i = 0
+        for start in range(0, len(images), MAX_PER_PAGE):
+            chunk = images[start:start + MAX_PER_PAGE]
+            page = Image.new("RGB", (self.page_w, self.page_h), self.bg_color)
 
-        while i < len(images):
-            y = y0 + row * row_step
+            x0 = self.margin_px
+            y0 = self.margin_px
+            col_step = self.photo_w + self.gap_px
+            row_step = self.photo_h + self.gap_px
 
-            # ---- TWO IMAGES AVAILABLE ----
-            if i + 1 < len(images):
-                img_left = images[i]
-                img_right = images[i + 1]
+            row = 0
+            i = 0
 
-                for r in range(2):  # repeat for two rows
-                    y_row = y + r * row_step
+            while i < len(chunk):
+                y = y0 + row * row_step
 
-                    page.paste(img_left, (x0 + 0 * col_step, y_row))
-                    page.paste(img_left, (x0 + 1 * col_step, y_row))
-                    page.paste(img_right, (x0 + 2 * col_step, y_row))
-                    page.paste(img_right, (x0 + 3 * col_step, y_row))
+                # ---- TWO IMAGES ----
+                if i + 1 < len(chunk):
+                    img_left = chunk[i]
+                    img_right = chunk[i + 1]
 
-                i += 2
-                row += 2
+                    for r in range(2):
+                        y_row = y + r * row_step
+                        page.paste(img_left, (x0 + 0 * col_step, y_row))
+                        page.paste(img_left, (x0 + 1 * col_step, y_row))
+                        page.paste(img_right, (x0 + 2 * col_step, y_row))
+                        page.paste(img_right, (x0 + 3 * col_step, y_row))
 
-            # ---- LAST SINGLE IMAGE ----
-            else:
-                img = images[i]
-                y_row = y
+                    i += 2
+                    row += 2
 
-                for c in range(4):
-                    page.paste(img, (x0 + c * col_step, y_row))
+                # ---- LAST SINGLE IMAGE (7th) ----
+                else:
+                    img = chunk[i]
+                    y_row = y
 
-                i += 1
-                row += 1
+                    for c in range(4):
+                        page.paste(img, (x0 + c * col_step, y_row))
 
-        page.save(output_path, dpi=(self.dpi, self.dpi))
-        return output_path
+                    i += 1
+                    row += 1
+
+            output_path = output_dir / "printed" / f"page_{uuid.uuid4().hex}.jpg"
+
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
+            page.save(output_path, dpi=(self.dpi, self.dpi))
+            page_index += 1
+
+        return page_index - 1
