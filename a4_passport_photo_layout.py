@@ -100,6 +100,14 @@ class A4PassportLayout:
                     i += 1
                     row += 1
 
+            completed_path = output_dir / "completed"
+            completed_path.mkdir(parents=True, exist_ok=True)
+
+            # move all images to completed folder
+            for img_path in image_paths[start:start + MAX_PER_PAGE]:
+                dest_path = completed_path / Path(img_path).name
+                Path(img_path).rename(dest_path)
+
             output_path = output_dir / "printed" / f"page_{uuid.uuid4().hex}.jpg"
 
             output_path.parent.mkdir(parents=True, exist_ok=True)

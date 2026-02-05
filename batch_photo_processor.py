@@ -3,6 +3,8 @@ import time
 from pathlib import Path
 from typing import List, Tuple
 import logging
+
+from batch_process_passport_photos_layout import batch_process_passport_photos_layout
 from passport_photo_maker import PassportPhotoMaker
 
 
@@ -80,6 +82,10 @@ class BatchProcessor:
                 total_outputs += outs
             except Exception:
                 logging.exception("Unexpected error while processing %s", p)
+
+        total_pages: int = batch_process_passport_photos_layout(output_dir=str(self.out))
+        logging.info("Created total %d A4 pages with passport photos", total_pages)
+
         return len(files), total_outputs
 
     def run_forever(self) -> None:
@@ -93,5 +99,8 @@ class BatchProcessor:
                 # ensure float arithmetic (avoids static type warning when mixing int and float)
                 to_sleep = max(0.0, self.poll_interval - elapsed)
                 time.sleep(to_sleep)
+
+                total_pages: int = batch_process_passport_photos_layout(output_dir=str(self.out))
+                logging.info("Created total %d A4 pages with passport photos", total_pages)
         except KeyboardInterrupt:
             logging.info("Interrupted by user, exiting.")
