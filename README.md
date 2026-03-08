@@ -26,22 +26,34 @@ Folder structure (auto-created inside the input directory):
 
 Usage (examples)
 
-- Run one processing cycle (useful for testing):
+- Run generator once (process raws -> Edited Photos):
 
 ```bash
-python main.py --input "C:\\path\\to\\camera_photos" --once
+python app.py generate --input "C:\\path\\to\\camera_photos"
 ```
 
-- Run continuously (poll every 60 seconds by default):
+- Watch continuously (process every 60s by default):
 
 ```bash
-python main.py --input "C:\\path\\to\\camera_photos"
+python app.py generate --input "C:\\path\\to\\camera_photos" --watch
 ```
 
-- Change poll interval:
+- Build layouts from Drop to Print into Printed (once):
 
 ```bash
-python main.py --input "C:\\path\\to\\camera_photos" --interval 30
+python app.py print --input "C:\\path\\to\\camera_photos"
+```
+
+- Watch Drop to Print continuously:
+
+```bash
+python app.py print --input "C:\\path\\to\\camera_photos" --watch --interval 30
+```
+
+- Do both sequentially (generate once, then print):
+
+```bash
+python app.py run-all --input "C:\\path\\to\\camera_photos"
 ```
 
 What the script does
