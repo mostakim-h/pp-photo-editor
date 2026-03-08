@@ -7,10 +7,10 @@
         "poll_interval": 10
     },
     "printer": {
-        "name": "Microsoft Print to PDF",
+        "name": "EPSON L130 Series",
         "paper_size": "A4",
         "copies": 1,
-        "auto_print": false
+        "auto_print": true
     },
     "ui": {
         "appearance_mode": "dark",

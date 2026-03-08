@@ -43,7 +43,7 @@ class ConfigWindow(ctk.CTkToplevel):
         self._printer_manager = PrinterManager()
 
         self.title("Configuration")
-        self.geometry("520x560")
+        self.geometry("520x600")
         self.resizable(False, False)
         self.grab_set()   # make modal
         self.focus_set()
@@ -83,14 +83,29 @@ class ConfigWindow(ctk.CTkToplevel):
         )
         self._printer_combo.grid(row=2, column=0, sticky="ew", **pad)
 
+        # Refresh + Open Printer Settings buttons side by side
+        printer_btn_row = ctk.CTkFrame(outer, fg_color="transparent")
+        printer_btn_row.grid(row=3, column=0, sticky="w", **pad)
+
         ctk.CTkButton(
-            outer,
-            text="↻  Refresh Printers",
-            width=160,
-            height=30,
+            printer_btn_row,
+            text="↻  Refresh",
+            width=120,
+            height=32,
             corner_radius=8,
+            fg_color=("gray35", "gray25"),
+            hover_color=("gray45", "gray35"),
             command=self._refresh_printers,
-        ).grid(row=3, column=0, sticky="w", **pad)
+        ).pack(side="left", padx=(0, 10))
+
+        ctk.CTkButton(
+            printer_btn_row,
+            text="🖨  Printer Settings",
+            width=180,
+            height=32,
+            corner_radius=8,
+            command=self._open_printer_settings,
+        ).pack(side="left")
 
         # ---- Paper size ----------------------------------------------------
         self._paper_var = tk.StringVar()
@@ -228,6 +243,31 @@ class ConfigWindow(ctk.CTkToplevel):
         if printers:
             self._printer_var.set(printers[0])
         logger.info("Printer list refreshed: %s", printers)
+
+    def _open_printer_settings(self) -> None:
+        """Open the printer driver preferences dialog for the selected printer."""
+        selected = self._printer_var.get().strip()
+        if not selected or selected == "(No printers found)":
+            from tkinter import messagebox
+            messagebox.showwarning(
+                "No Printer Selected",
+                "Please select a printer first.",
+                parent=self,
+            )
+            return
+        try:
+            # Pass this window's native hwnd so the dialog has a proper parent
+            hwnd = self.winfo_id()
+            self._printer_manager.open_printer_settings(selected, parent_hwnd=hwnd)
+            logger.info("Printer settings opened for: %s", selected)
+        except Exception as exc:
+            from tkinter import messagebox
+            messagebox.showerror(
+                "Printer Settings Error",
+                f"Could not open printer settings:\n{exc}",
+                parent=self,
+            )
+            logger.error("Failed to open printer settings: %s", exc)
 
     def _on_appearance_change(self, value: str) -> None:
         ctk.set_appearance_mode(value)
