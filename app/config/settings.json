@@ -1,0 +1,19 @@
+{
+    "input_dir": "C:/Users/HP/Desktop/input",
+    "generator": {
+        "poll_interval": 10
+    },
+    "layout": {
+        "poll_interval": 10
+    },
+    "printer": {
+        "name": "EPSON L130 Series",
+        "paper_size": "A4",
+        "copies": 1,
+        "auto_print": true
+    },
+    "ui": {
+        "appearance_mode": "dark",
+        "color_theme": "blue"
+    }
+}

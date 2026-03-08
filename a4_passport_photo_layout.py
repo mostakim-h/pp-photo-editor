@@ -49,9 +49,12 @@ class A4PassportLayout:
 
         return bordered
 
-    def create_pages(self, image_paths: List[str], output_dir: str):
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
+    def create_pages(self, image_paths: List[str], printed_dir: str, completed_dir: str):
+        printed_dir = Path(printed_dir)
+        completed_dir = Path(completed_dir)
+
+        printed_dir.mkdir(parents=True, exist_ok=True)
+        completed_dir.mkdir(parents=True, exist_ok=True)
 
         # ---- PREPARE ALL IMAGES ONCE ----
         images = [self.prepare_image(p) for p in image_paths]
@@ -100,15 +103,12 @@ class A4PassportLayout:
                     i += 1
                     row += 1
 
-            completed_path = output_dir / "completed"
-            completed_path.mkdir(parents=True, exist_ok=True)
-
             # move all images to completed folder
             for img_path in image_paths[start:start + MAX_PER_PAGE]:
-                dest_path = completed_path / Path(img_path).name
+                dest_path = completed_dir / Path(img_path).name
                 Path(img_path).rename(dest_path)
 
-            output_path = output_dir / "printed" / f"page_{uuid.uuid4().hex}.jpg"
+            output_path = printed_dir / f"page_{uuid.uuid4().hex}.jpg"
 
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
