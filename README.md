@@ -1,10 +1,107 @@
-Passport Photo Maker
+# Passport Photo Processing System
 
-This small utility detects faces in images, produces passport-style images composited over a blue background, and manages files in batch: processed raw images are moved to a processed folder and edited outputs are written to the Edited Photos folder.
+A desktop GUI application (and CLI) for processing passport photos — detecting faces, replacing backgrounds, and generating print-ready A4 layouts.
 
-What's new / overview
-- Code is refactored into two classes: `PassportPhotoMaker` (face detection + image creation) and `BatchProcessor` (watches a folder, processes images, saves outputs, moves processed files aside).
-- The script can run continuously (polling every N seconds) or once for testing.
+---
+
+## ✨ Features
+
+- **GUI desktop app** built with [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter)
+- **Passport Photo Generator** — detects faces, applies blue background, saves edited photos
+- **Batch Layout Processor** — tiles photos into A4 print layouts (7 photos / page)
+- **Auto-print** support via Windows printer API (`pywin32`)
+- **Settings persistence** — folder paths, printer config, and UI theme saved to `app/config/settings.json`
+- Both jobs run **in background threads** — the UI never freezes
+- **Log console** with colour-coded `[INFO]` / `[WARN]` / `[ERROR]` output
+
+---
+
+## 🚀 Quickstart — GUI
+
+```bash
+# 1. Install dependencies
+pip install -r requirements.txt
+
+# 2. Launch the GUI
+python run_gui.py
+```
+
+---
+
+## 📁 Project Structure
+
+```
+pp-photo-editor/
+│
+├── run_gui.py                  ← GUI launcher (project root)
+│
+├── app/                        ← GUI application package
+│   ├── main.py                 ← Entry point
+│   ├── gui/
+│   │   ├── main_window.py      ← Main application window
+│   │   ├── config_window.py    ← Settings / Configuration dialog
+│   │   └── widgets.py          ← Reusable widget components
+│   ├── core/
+│   │   ├── folder_manager.py   ← Directory creation & validation
+│   │   ├── generator.py        ← Photo generator pipeline (threaded)
+│   │   └── layout_processor.py ← Layout processor pipeline (threaded)
+│   ├── printing/
+│   │   └── printer_manager.py  ← Windows printer detection & print jobs
+│   └── config/
+│       ├── settings.py         ← Load/save JSON settings
+│       └── settings.json       ← Persisted user settings
+│
+├── passport_photo_maker.py     ← Core: face detection + blue-BG compositing
+├── batch_photo_processor.py    ← Core: batch folder processor
+├── batch_process_passport_photos_layout.py  ← Layout generation
+├── a4_passport_photo_layout.py ← A4 tiling engine
+├── face_detector.py            ← OpenCV / DNN face detector
+└── app.py                      ← Legacy CLI entry point
+```
+
+---
+
+## 📂 Working Directory Structure
+
+The app auto-creates this layout inside your chosen **Input Folder**:
+
+```
+Input Folder/
+├── Edited Photos/
+│   ├── Drop to Print/      ← Move selected edited photos here
+│   └── Printed/            ← Final A4 layout pages saved here
+└── Processed Raw/          ← Original camera files moved here after processing
+```
+
+---
+
+## 🖥 GUI Walkthrough
+
+1. **Select Input Folder** — browse to your camera dump directory
+2. **Run Generator** — processes all raw photos → saves edited versions to `Edited Photos/`
+3. **Manual step** — move your chosen edited photos into `Edited Photos/Drop to Print/`
+4. **Run Layout** — generates A4 print pages into `Edited Photos/Printed/`
+5. **Auto-print** (optional) — configure in ⚙ Configuration → tick *Auto-print after layout generation*
+
+---
+
+## ⚙ Configuration
+
+Open **⚙ Configuration** from the main window to set:
+
+| Setting | Description |
+|---|---|
+| Printer | Detected from installed Windows printers |
+| Paper Size | `4x6` / `A4` / `Custom` |
+| Copies | Number of print copies |
+| Auto-print | Send layouts directly to printer after generation |
+| Theme | `dark` / `light` / `system` |
+
+---
+
+## 🔧 CLI Usage (Legacy)
+
+The original CLI is still available via `app.py`:
 
 Prerequisites
 1. Python 3.8+ (recommended)
