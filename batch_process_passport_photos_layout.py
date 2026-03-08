@@ -5,16 +5,23 @@ from a4_passport_photo_layout import A4PassportLayout
 last_img_count = 0
 is_last_page = False
 
-def batch_process_passport_photos_layout(output_dir: str):
+def batch_process_passport_photos_layout(drop_to_print_dir: str, printed_dir: str):
 
     global last_img_count, is_last_page
 
-    output_dir = Path(output_dir)
+    drop_path = Path(drop_to_print_dir)
+    printed_path = Path(printed_dir)
+
+    drop_path.mkdir(parents=True, exist_ok=True)
+    printed_path.mkdir(parents=True, exist_ok=True)
+
     images = sorted(
-        str(p) for p in output_dir.glob("*.jpg")
+        str(p) for p in drop_path.glob("*.jpg")
     )
 
     if not images:
+        last_img_count = 0
+        is_last_page = False
         return 0
 
     if last_img_count == len(images):
@@ -30,8 +37,13 @@ def batch_process_passport_photos_layout(output_dir: str):
         layout = A4PassportLayout()
         total_pages = layout.create_pages(
             image_paths=images,
-            output_dir=str(output_dir)
+            printed_dir=str(printed_path),
+            completed_dir=str(drop_path / "Completed")
         )
+
+        # Reset counters after a page is produced
+        last_img_count = 0
+        is_last_page = False
 
         return total_pages
 

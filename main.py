@@ -10,9 +10,7 @@ from passport_photo_maker import PassportPhotoMaker
 # ------------------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Batch passport photo maker")
-    parser.add_argument("--src", default=r"C:\\Users\\NLM-BD\\Documents\\from_automation\\raw_images", help="Source folder to watch")
-    parser.add_argument("--out", default=r"C:\\Users\\NLM-BD\\Documents\\from_automation\\edited_images", help="Folder to write edited images")
-    parser.add_argument("--trash", default=r"C:\\Users\\NLM-BD\\Documents\\from_automation\\trash", help="Folder to move processed raws to")
+    parser.add_argument("--input", default=".", help="Input folder containing camera photos and Edited Photos structure")
     parser.add_argument("--interval", type=int, default=60, help="Poll interval in seconds")
     parser.add_argument("--once", action="store_true", help="Run one processing cycle and exit (useful for testing)")
     args = parser.parse_args()
@@ -25,7 +23,7 @@ if __name__ == "__main__":
         logging.error("Face cascade not found: %s", e)
         raise
 
-    processor = BatchProcessor(args.src, args.out, args.trash, maker, poll_interval=args.interval)
+    processor = BatchProcessor(args.input, maker, poll_interval=args.interval)
 
     if args.once:
         files, outputs = processor.process_once()
