@@ -1,46 +1,37 @@
 """
 printer_manager.py
 ------------------
-Handles printer detection and print-job submission on Windows.
+Handles printer detection and silent print-job submission on Windows.
 
-Falls back gracefully on non-Windows platforms (detection returns an
-empty list; print_file raises NotImplementedError).
+print_file() sends a JPEG/PNG directly to the printer via the Windows
+GDI API (win32print + win32ui + PIL ImageWin).  This is fully silent —
+no dialog, no preview, no associated-application pop-up.  The printer
+driver uses whatever settings the user last saved through the
+Printer Settings dialog.
 """
 
 import logging
-import os
 import sys
 from pathlib import Path
 from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Try to import win32print; if not available we degrade gracefully.
-# ---------------------------------------------------------------------------
 try:
-    import win32print  # type: ignore
-
-    _WIN32PRINT_AVAILABLE = True
+    import win32print   # type: ignore
+    import win32ui      # type: ignore
+    import win32con     # type: ignore
+    _WIN32_AVAILABLE = True
 except ImportError:
-    _WIN32PRINT_AVAILABLE = False
+    _WIN32_AVAILABLE = False
     logger.warning(
-        "pywin32 not installed — printer detection and printing are unavailable. "
+        "pywin32 not fully installed — printing unavailable. "
         "Run: pip install pywin32"
     )
 
 
 class PrinterManager:
-    """
-    Thin abstraction over the Windows printing subsystem.
-
-    Typical usage::
-
-        pm = PrinterManager()
-        printers = pm.list_printers()          # ["Microsoft Print to PDF", ...]
-        default  = pm.get_default_printer()    # "HP LaserJet" (or None)
-        pm.print_file("layout.jpg", printer_name="HP LaserJet", copies=2)
-    """
+    """Thin abstraction over the Windows printing subsystem."""
 
     # ------------------------------------------------------------------
     # Printer discovery
@@ -48,27 +39,21 @@ class PrinterManager:
 
     def list_printers(self) -> List[str]:
         """Return the names of all locally installed printers."""
-        if not _WIN32PRINT_AVAILABLE:
-            logger.warning("win32print unavailable — returning empty printer list.")
+        if not _WIN32_AVAILABLE:
             return []
-
         try:
-            # PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS = 6
             printers = win32print.EnumPrinters(
                 win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS,
-                None,
-                1,
+                None, 1,
             )
-            names = [p[2] for p in printers]
-            logger.debug("Detected printers: %s", names)
-            return names
+            return [p[2] for p in printers]
         except Exception as exc:
             logger.error("Failed to enumerate printers: %s", exc)
             return []
 
     def get_default_printer(self) -> Optional[str]:
         """Return the name of the system default printer, or None."""
-        if not _WIN32PRINT_AVAILABLE:
+        if not _WIN32_AVAILABLE:
             return None
         try:
             return win32print.GetDefaultPrinter()
@@ -77,7 +62,7 @@ class PrinterManager:
             return None
 
     # ------------------------------------------------------------------
-    # Printing
+    # Silent direct printing
     # ------------------------------------------------------------------
 
     def print_file(
@@ -87,64 +72,135 @@ class PrinterManager:
         copies: int = 1,
     ) -> None:
         """
-        Send *file_path* to *printer_name* (or the system default).
+        Send *file_path* silently and directly to *printer_name*.
 
-        Strategy:
-          1. On Windows with win32print available → use ShellExecute "print"
-          2. Fallback → raise NotImplementedError
+        Uses the Windows GDI API to render the image straight onto the
+        printer device context.  No dialog, no preview window, no
+        associated application is opened.  The printer driver uses
+        whatever paper/quality/orientation settings were last saved.
+
+        Parameters
+        ----------
+        file_path    : Path to the image file (JPEG, PNG, BMP, TIFF …).
+        printer_name : Target printer name.  Defaults to system default.
+        copies       : Number of copies to print.
         """
+        if sys.platform != "win32":
+            raise NotImplementedError("Silent printing is only supported on Windows.")
+
+        if not _WIN32_AVAILABLE:
+            raise RuntimeError(
+                "pywin32 is not installed. Run: pip install pywin32"
+            )
+
         file_path = Path(file_path)
         if not file_path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
 
-        if sys.platform != "win32":
-            raise NotImplementedError("Direct printing is only supported on Windows.")
-
-        target_printer = printer_name or self.get_default_printer()
-        if not target_printer:
+        target = printer_name or self.get_default_printer()
+        if not target:
             raise ValueError("No printer specified and no default printer found.")
 
         logger.info(
-            "Printing '%s' to '%s' (%d cop%s) …",
-            file_path.name,
-            target_printer,
-            copies,
-            "y" if copies == 1 else "ies",
+            "Silent print: '%s' → '%s'  (×%d)",
+            file_path.name, target, copies,
         )
 
         for copy_num in range(1, copies + 1):
-            logger.debug("  Sending copy %d/%d …", copy_num, copies)
-            self._shell_print(file_path, target_printer)
+            logger.debug("  Copy %d/%d …", copy_num, copies)
+            self._gdi_print(file_path, target)
 
-        logger.info("Print job submitted for '%s'.", file_path.name)
+        logger.info("Print job(s) submitted for '%s'.", file_path.name)
 
     # ------------------------------------------------------------------
-    # Internal helpers
+    # GDI rendering — the actual silent print engine
     # ------------------------------------------------------------------
 
-    def _shell_print(self, file_path: Path, printer_name: str) -> None:
-        """Use Windows ShellExecute to send the file to the printer."""
+    def _gdi_print(self, file_path: Path, printer_name: str) -> None:
+        """
+        Render *file_path* onto *printer_name* via the Windows GDI API.
+
+        Steps:
+          1. Open the printer and retrieve its DEVMODE (stored driver settings).
+          2. Create a printer Device Context (DC) from that DEVMODE so the
+             driver's paper/quality/orientation settings are honoured.
+          3. Open the image with Pillow and scale it to fill the printable area
+             while preserving the aspect ratio.
+          4. Use PIL.ImageWin.Dib to blit the image onto the DC.
+          5. Close the print job cleanly.
+        """
+        from PIL import Image, ImageWin  # type: ignore
+
+        # ---- 1. Open printer & get stored DEVMODE -------------------------
+        h_printer = win32print.OpenPrinter(printer_name)
         try:
-            import win32api  # type: ignore
-            import win32con  # type: ignore
+            # Level-2 info gives us the DEVMODE with the user's stored settings
+            printer_info = win32print.GetPrinter(h_printer, 2)
+            devmode = printer_info.get("pDevMode")
+        finally:
+            win32print.ClosePrinter(h_printer)
 
-            win32api.ShellExecute(
-                0,
-                "print",
-                str(file_path),
-                f'/d:"{printer_name}"',
-                ".",
-                win32con.SW_HIDE,
+        # ---- 2. Create a printer DC from the stored DEVMODE ---------------
+        hdc = win32ui.CreateDC()
+        hdc.CreatePrinterDC(printer_name)
+
+        # Apply the stored DEVMODE settings onto the DC
+        if devmode:
+            try:
+                hdc.ResetDC(devmode)
+            except Exception as exc:
+                logger.debug("ResetDC skipped (%s) — using driver defaults", exc)
+
+        # ---- 3. Query printable area dimensions (in device pixels) --------
+        # PHYSICALWIDTH / PHYSICALHEIGHT = total paper pixels
+        # PHYSICALOFFSETX / PHYSICALOFFSETY = unprintable margin pixels
+        phys_w   = hdc.GetDeviceCaps(win32con.PHYSICALWIDTH)
+        phys_h   = hdc.GetDeviceCaps(win32con.PHYSICALHEIGHT)
+        offset_x = hdc.GetDeviceCaps(win32con.PHYSICALOFFSETX)
+        offset_y = hdc.GetDeviceCaps(win32con.PHYSICALOFFSETY)
+        print_w  = hdc.GetDeviceCaps(win32con.HORZRES)   # printable width
+        print_h  = hdc.GetDeviceCaps(win32con.VERTRES)   # printable height
+
+        logger.debug(
+            "Printer DC — phys=(%d×%d) offset=(%d,%d) printable=(%d×%d)",
+            phys_w, phys_h, offset_x, offset_y, print_w, print_h,
+        )
+
+        # ---- 4. Open image and scale to fit the printable area ------------
+        img = Image.open(file_path).convert("RGB")
+        img_w, img_h = img.size
+
+        # Scale to fill printable area, preserving aspect ratio
+        scale = min(print_w / img_w, print_h / img_h)
+        dest_w = int(img_w * scale)
+        dest_h = int(img_h * scale)
+
+        # Centre on the printable area
+        dest_x = (print_w - dest_w) // 2
+        dest_y = (print_h - dest_h) // 2
+
+        # ---- 5. Send to printer -------------------------------------------
+        hdc.StartDoc(file_path.name)
+        hdc.StartPage()
+        try:
+            dib = ImageWin.Dib(img)
+            dib.draw(
+                hdc.GetHandleOutput(),
+                (dest_x, dest_y, dest_x + dest_w, dest_y + dest_h),
             )
-        except ImportError:
-            # Fallback: use the built-in os.startfile print verb (less control)
-            logger.warning(
-                "win32api not available — falling back to os.startfile for printing."
-            )
-            os.startfile(str(file_path), "print")
-        except Exception as exc:
-            logger.error("ShellExecute print failed: %s", exc)
-            raise
+        finally:
+            hdc.EndPage()
+            hdc.EndDoc()
+            hdc.DeleteDC()
+
+        logger.debug(
+            "GDI print complete: image=%dx%d → dest=%dx%d at (%d,%d)",
+            img_w, img_h, dest_w, dest_h, dest_x, dest_y,
+        )
+
+    # ------------------------------------------------------------------
+    # Open printer driver settings dialog
+    # ------------------------------------------------------------------
 
     def open_printer_settings(
         self,
@@ -152,23 +208,10 @@ class PrinterManager:
         parent_hwnd: int = 0,
     ) -> None:
         """
-        Open the full printer driver Printing Preferences dialog for
-        *printer_name* (or the system default).
-
-        Gives the user direct access to paper type, media, print quality,
-        colour mode, layout — everything the printer driver exposes.
-
-        Parameters
-        ----------
-        printer_name:
-            Name of the printer to configure.  Defaults to the system default.
-        parent_hwnd:
-            Native window handle of the calling window.  Pass the Tkinter
-            root's winfo_id() for proper dialog parenting (optional).
+        Open the printer driver Printing Preferences dialog.
 
         Strategy (tried in order):
-          1. rundll32 printui.dll,PrintUIEntry /p  — Printing Preferences sheet
-             (always opens as a visible, foreground window)
+          1. rundll32 printui.dll,PrintUIEntry /p  — always opens foreground
           2. win32print.DocumentProperties with parent_hwnd
           3. Open Devices and Printers folder as last resort
         """
@@ -179,46 +222,24 @@ class PrinterManager:
         logger.info("Opening printer settings for: %s", target)
 
         # ---- Strategy 1: rundll32 printui.dll /p --------------------------
-        # /p  = Printing Preferences (driver properties dialog)
-        # This is the most reliable way to get a visible foreground dialog.
         try:
             import subprocess
-            result = subprocess.Popen(
-                [
-                    "rundll32.exe",
-                    "printui.dll,PrintUIEntry",
-                    "/p",          # open Printing Preferences dialog
-                    "/n", target,
-                ],
+            proc = subprocess.Popen(
+                ["rundll32.exe", "printui.dll,PrintUIEntry", "/p", "/n", target],
                 shell=False,
             )
-            logger.info(
-                "rundll32 printui.dll /p launched for '%s' (pid=%s)",
-                target, result.pid,
-            )
+            logger.info("printui.dll /p launched for '%s' (pid=%s)", target, proc.pid)
             return
         except Exception as exc:
-            logger.warning(
-                "rundll32 printui.dll /p failed (%s) — trying DocumentProperties", exc
-            )
+            logger.warning("rundll32 failed (%s) — trying DocumentProperties", exc)
 
         # ---- Strategy 2: win32print.DocumentProperties --------------------
-        # Requires a valid hwnd; falls back to 0 if none provided.
-        if _WIN32PRINT_AVAILABLE:
+        if _WIN32_AVAILABLE:
             try:
-                import win32print  # type: ignore
-                import win32con    # type: ignore
-                import ctypes
-
                 h_printer = win32print.OpenPrinter(target)
                 try:
-                    hwnd = parent_hwnd or 0
                     win32print.DocumentProperties(
-                        hwnd,
-                        h_printer,
-                        target,
-                        None,
-                        None,
+                        parent_hwnd, h_printer, target, None, None,
                         win32con.DM_IN_PROMPT | win32con.DM_OUT_BUFFER,
                     )
                     logger.info("DocumentProperties dialog closed for '%s'.", target)
@@ -226,9 +247,7 @@ class PrinterManager:
                 finally:
                     win32print.ClosePrinter(h_printer)
             except Exception as exc:
-                logger.warning(
-                    "DocumentProperties failed (%s) — opening Devices & Printers", exc
-                )
+                logger.warning("DocumentProperties failed (%s)", exc)
 
         # ---- Strategy 3: Devices and Printers folder ----------------------
         try:
@@ -240,6 +259,4 @@ class PrinterManager:
             raise RuntimeError(
                 f"Could not open printer settings for '{target}': {exc}"
             ) from exc
-
-
 
