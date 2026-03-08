@@ -60,6 +60,9 @@ class MainWindow(ctk.CTk):
         self._gen_job: Optional[GeneratorJob] = None
         self._layout_job: Optional[LayoutProcessorJob] = None
 
+        # Shared event used to trigger a forced last-page print
+        self._force_last_page_event = threading.Event()
+
         # Active worker threads
         self._gen_thread: Optional[threading.Thread] = None
         self._layout_thread: Optional[threading.Thread] = None
@@ -158,6 +161,18 @@ class MainWindow(ctk.CTk):
             font=ctk.CTkFont(size=13),
         ).grid(row=2, column=0, sticky="w", padx=16, pady=4)
 
+        # "Print last page" sub-option — indented under Layout Processor
+        self._force_last_page_var = tk.BooleanVar(value=False)
+        ctk.CTkCheckBox(
+            jobs_frame,
+            text="Print last page  (process < 7 images)",
+            variable=self._force_last_page_var,
+            onvalue=True, offvalue=False,
+            font=ctk.CTkFont(size=11),
+            text_color=("gray40", "gray70"),
+            command=self._on_force_last_page_checkbox,
+        ).grid(row=3, column=0, sticky="w", padx=(36, 16), pady=(0, 6))
+
         # --- Status labels ------------------------------------------------
         self._gen_status = ctk.CTkLabel(
             jobs_frame, text="● Idle", font=ctk.CTkFont(size=11), anchor="w",
@@ -173,7 +188,7 @@ class MainWindow(ctk.CTk):
 
         # --- Buttons (right side) -----------------------------------------
         btn_col = ctk.CTkFrame(jobs_frame, fg_color="transparent")
-        btn_col.grid(row=1, column=2, rowspan=3, padx=16, pady=8, sticky="e")
+        btn_col.grid(row=1, column=2, rowspan=4, padx=16, pady=8, sticky="e")
 
         # Generator start/stop toggle
         self._btn_gen = ctk.CTkButton(
@@ -196,6 +211,18 @@ class MainWindow(ctk.CTk):
             command=self._toggle_layout,
         )
         self._btn_layout.pack(pady=5)
+
+        # Print last page — fires force_last_page_event immediately
+        self._btn_print_last = ctk.CTkButton(
+            btn_col,
+            text="⎙  Print Last Page",
+            width=200, height=34, corner_radius=8,
+            font=ctk.CTkFont(size=12),
+            fg_color=("gray35", "gray25"),
+            hover_color=("gray45", "gray35"),
+            command=self._trigger_force_last_page,
+        )
+        self._btn_print_last.pack(pady=(0, 5))
 
         # Start/Stop all selected jobs
         self._btn_both = ctk.CTkButton(
@@ -421,6 +448,9 @@ class MainWindow(ctk.CTk):
         printer     = self._settings.get("printer.name", "") or None
         copies      = int(self._settings.get("printer.copies", 1))
 
+        # Reset the event so any stale signal from before start is ignored
+        self._force_last_page_event.clear()
+
         self._layout_running = True
         self._set_layout_status("● Watching …", "#f39c12")
         self._btn_layout.configure(text="⏹  Stop Layout", fg_color=_CLR_STOP)
@@ -437,6 +467,7 @@ class MainWindow(ctk.CTk):
             auto_print=auto_print,
             printer_name=printer,
             copies=copies,
+            force_last_page=self._force_last_page_event,
             on_stopped=_on_stopped,
         )
         self._layout_thread = threading.Thread(
@@ -444,6 +475,31 @@ class MainWindow(ctk.CTk):
         )
         self._layout_thread.start()
         self._log("[INFO] Layout Processor started — watching Drop to Print.")
+
+    def _on_force_last_page_checkbox(self) -> None:
+        """
+        Called when the 'Print last page' checkbox is toggled.
+        If ticked while the layout watcher is already running, fire immediately.
+        """
+        if self._force_last_page_var.get() and self._layout_running:
+            self._trigger_force_last_page()
+            # Reset the checkbox — it's a one-shot trigger, not a sticky mode
+            self._force_last_page_var.set(False)
+
+    def _trigger_force_last_page(self) -> None:
+        """
+        Signal the layout worker to process whatever images are in
+        Drop to Print right now, even if fewer than 7.
+        Works whether the watcher is already running or will be started next.
+        """
+        if not self._layout_running:
+            # Start the layout watcher first, then fire the event
+            self._start_layout()
+
+        self._force_last_page_event.set()
+        self._log("[INFO] Print Last Page requested — processing current images …")
+        # Reset the checkbox visual (it's a momentary trigger)
+        self._force_last_page_var.set(False)
 
     # ==================================================================
     # Job stoppers
